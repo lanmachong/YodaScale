@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+/build
+/app/build
+/local.properties
+
+# IDE / Editor
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# Android 构建产物
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# 本机工具链与工作区数据（不应入库）
+.buildtools/
+.workbuddy/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 注意：gradle/wrapper/gradle-wrapper.jar 需要入库，不要忽略
