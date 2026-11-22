@@ -20,6 +20,7 @@ import android.text.InputType
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import android.annotation.SuppressLint
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -395,6 +396,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @SuppressLint("MissingPermission") // 已通过 hasPermissions() 校验
     private fun startScanning() {
         if (adapter == null || !adapter!!.isEnabled) {
             tvStatus.text = "请先打开手机蓝牙"
@@ -417,6 +419,7 @@ class MainActivity : AppCompatActivity() {
         mainHandler.postDelayed(stopScanRunnable, scanTimeoutMs)
     }
 
+    @SuppressLint("MissingPermission") // 扫描期权限已授予；stopScan 不抛权限异常
     private fun stopScanning() {
         mainHandler.removeCallbacks(stopScanRunnable)
         if (!scanning) return
