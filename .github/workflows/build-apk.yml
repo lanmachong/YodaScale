@@ -20,9 +20,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # ubuntu-latest 已预装 Android SDK 与 sdkmanager，无需第三方 setup action
+      # ubuntu-latest 预装 Android SDK，但 sdkmanager 不在 PATH，需显式定位
       - name: Install SDK platform
         run: |
+          export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/current/bin"
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
