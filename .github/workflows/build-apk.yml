@@ -4,8 +4,13 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
+
+# 打 tag 时需要创建 Release 并上传 APK 附件
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -62,3 +67,17 @@ jobs:
           path: app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
           retention-days: 30
+
+      # 推送 v* tag 时自动创建 Release 并把 APK 挂上去，OTA 直接可用
+      - name: Publish Release with APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$APK" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$APK" \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi

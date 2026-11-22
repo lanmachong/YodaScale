@@ -48,15 +48,14 @@ class MainActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences("profile", Context.MODE_PRIVATE) }
     private lateinit var profile: UserProfile
     private var latestKg: Double? = null
+    /** 本次扫描暂存的最后一次锁定读数；停扫时才合并入库，避免重复记录 */
+    private var pendingReading: ScaleReading? = null
 
     // 稳定读数后自动停扫的延时（省电），与扫描总超时兜底
     private val autoStopDelayMs = 3000L
     private val scanTimeoutMs = 90_000L
     private val stopScanRunnable = Runnable {
-        if (scanning) {
-            stopScanning()
-            tvStatus.text = "已记录 · 扫描已自动停止（省电）"
-        }
+        if (scanning) stopScanning()
     }
 
     private fun scheduleAutoStop() {
@@ -109,6 +108,7 @@ class MainActivity : AppCompatActivity() {
         tvProfile.setOnClickListener { showProfileDialog() }
         findViewById<View>(R.id.btnClear).setOnClickListener {
             db.clear()
+            pendingReading = null
             latestKg = null
             renderAll()
             tvStatus.text = "历史已清空"
@@ -185,19 +185,27 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /** 广播中会连续收到多帧相同读数：先只更新暂存值和界面，停扫时统一写入最后一次。 */
     private fun onReading(r: ScaleReading) {
+        pendingReading = r
         latestKg = r.weightKg
         tvWeight.text = String.format("%.1f", r.weightKg)
         tvMeta.text = "原始值 ${r.rawWeight} · 电阻 ${r.resistance} · ${r.mac}"
-        val id = db.insert(r)
         renderMetrics()
-        if (id > 0) {
-            tvStatus.text = "已记录 ${dateFmt.format(Date())} · 即将自动停止扫描"
+        tvStatus.text = "读数已锁定 · 即将合并记录并停止扫描"
+        // 收到稳定锁定读数后，延时自动停扫，避免蓝牙一直开着耗电
+        scheduleAutoStop()
+    }
+
+    /** 合并本次扫描的全部读数：只把最后一次写入数据库，并刷新历史与对比。 */
+    private fun commitPendingReading() {
+        val r = pendingReading ?: return
+        pendingReading = null
+        if (db.insert(r) > 0) {
+            tvStatus.text = "已记录 ${dateFmt.format(Date())} · 扫描已停止（省电）"
             renderCompare()
             renderHistory()
         }
-        // 收到稳定锁定读数后，延时自动停扫，避免蓝牙一直开着耗电
-        scheduleAutoStop()
     }
 
     private fun renderAll() {
@@ -410,6 +418,7 @@ class MainActivity : AppCompatActivity() {
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
+        pendingReading = null
         adapter!!.bluetoothLeScanner.startScan(null, settings, scanCallback)
         scanning = true
         btnScan.text = "停止扫描"
@@ -422,6 +431,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission") // 扫描期权限已授予；stopScan 不抛权限异常
     private fun stopScanning() {
         mainHandler.removeCallbacks(stopScanRunnable)
+        commitPendingReading()
         if (!scanning) return
         try {
             adapter!!.bluetoothLeScanner.stopScan(scanCallback)
