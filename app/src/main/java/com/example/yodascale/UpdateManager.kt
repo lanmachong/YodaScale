@@ -18,6 +18,8 @@ import java.io.BufferedReader
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 应用内 OTA 更新：从 GitHub Releases 拉取最新版本并安装。
@@ -36,7 +38,16 @@ object UpdateManager {
     // ====================================
 
     private const val API_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
-    private const val TIMEOUT_MS = 15_000
+    private const val TIMEOUT_MS = 20_000
+    /** 下载总超时；进度连续 STALL_MS 无推进即判定卡死并切换下载源 */
+    private const val DOWNLOAD_TIMEOUT_MS = 180_000L
+    private const val STALL_MS = 20_000L
+    /** GitHub 附件下载备用加速前缀，官方源失败时依次尝试 */
+    private val MIRROR_PREFIXES = listOf(
+        "", // 官方源
+        "https://ghfast.top/",
+        "https://gh-proxy.com/",
+    )
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /** 由「检查更新」按钮触发。 */
@@ -108,48 +119,118 @@ object UpdateManager {
             .setCancelable(false)
             .show()
 
-        Thread {
-            try {
-                val dir = File(activity.cacheDir, "updates").apply { mkdirs() }
-                val apk = File(dir, "app-$tag.apk")
-                val conn = URL(url).openConnection() as HttpURLConnection
-                conn.connectTimeout = TIMEOUT_MS
-                conn.readTimeout = TIMEOUT_MS
-                conn.requestMethod = "GET"
-                conn.connect()
-                if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+        val dir = File(activity.cacheDir, "updates").apply { mkdirs() }
+        val apk = File(dir, "app-$tag.apk")
+        val startTime = System.currentTimeMillis()
+        val cancelled = AtomicBoolean(false)
+        val lastProgressAt = AtomicLong(System.currentTimeMillis())
 
-                val total = conn.contentLength
-                var downloaded = 0
-                conn.inputStream.use { input ->
-                    apk.outputStream().use { out ->
-                        val buf = ByteArray(8 * 1024)
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n <= 0) break
-                            out.write(buf, 0, n)
-                            downloaded += n
-                            if (total > 0) {
-                                val percent = (downloaded * 100 / total).coerceIn(0, 100)
-                                mainHandler.post { progress.progress = percent }
+        // 看门狗：总超时或进度长时间停滞时强制取消当前连接，触发换源重试
+        val watchdog = Thread {
+            while (!cancelled.get()) {
+                if (System.currentTimeMillis() - startTime > DOWNLOAD_TIMEOUT_MS) break
+                if (System.currentTimeMillis() - lastProgressAt.get() > STALL_MS) break
+                try {
+                    Thread.sleep(2000)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+            if (!cancelled.get()) {
+                cancelled.set(true)
+                mainHandler.post { progress.progress = 0 }
+            }
+        }.apply { isDaemon = true }
+
+        Thread {
+            var lastError: String = "未知错误"
+            try {
+                watchdog.start()
+                for (prefix in MIRROR_PREFIXES) {
+                    if (cancelled.get()) break
+                    val target = prefix + url
+                    try {
+                        lastError = downloadOnce(target, apk, progress, cancelled, lastProgressAt)
+                            ?: "下载不完整"
+                        if (cancelled.get()) {
+                            lastError = "下载超时或连接停滞"
+                            continue
+                        }
+                        if (apk.length() >= 100_000) {
+                            cancelled.set(true)
+                            mainHandler.post {
+                                dialog.dismiss()
+                                install(activity, apk)
                             }
+                            return@Thread
+                        }
+                        lastError = "下载文件异常"
+                    } catch (e: Exception) {
+                        lastError = e.message ?: e.javaClass.simpleName
+                    } finally {
+                        // 重置停滞计时，给下一个源判定窗口
+                        lastProgressAt.set(System.currentTimeMillis())
+                    }
+                }
+                val reason = lastError
+                mainHandler.post {
+                    dialog.dismiss()
+                    AlertDialog.Builder(activity)
+                        .setTitle("下载失败")
+                        .setMessage("$reason\n\n所有下载源均不可用。可改用浏览器打开链接下载，或用系统浏览器访问项目 Releases 页面手动安装。")
+                        .setPositiveButton("用浏览器打开") { _, _ ->
+                            activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        }
+                        .setNegativeButton("知道了", null)
+                        .show()
+                }
+            } finally {
+                cancelled.set(true)
+            }
+        }.start()
+    }
+
+    /** 单次下载。返回 null 表示成功，否则返回错误描述。停滞由外部看门狗通过 cancelled 取消。 */
+    private fun downloadOnce(
+        url: String,
+        apk: File,
+        progress: ProgressBar,
+        cancelled: AtomicBoolean,
+        lastProgressAt: AtomicLong,
+    ): String? {
+        var conn: HttpURLConnection? = null
+        try {
+            conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = TIMEOUT_MS
+            conn.readTimeout = TIMEOUT_MS
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "YodaScale-Updater")
+            conn.connect()
+            val code = conn.responseCode
+            if (code !in 200..299) return "HTTP $code"
+
+            val total = conn.contentLength
+            var downloaded = 0L
+            conn.inputStream.use { input ->
+                apk.outputStream().use { out ->
+                    val buf = ByteArray(16 * 1024)
+                    while (!cancelled.get()) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        out.write(buf, 0, n)
+                        downloaded += n
+                        lastProgressAt.set(System.currentTimeMillis())
+                        if (total > 0) {
+                            val percent = (downloaded * 100 / total).coerceIn(0, 100).toInt()
+                            mainHandler.post { progress.progress = percent }
                         }
                     }
                 }
-                conn.disconnect()
-                if (apk.length() < 100_000) throw Exception("下载文件异常")
-
-                mainHandler.post {
-                    dialog.dismiss()
-                    install(activity, apk)
-                }
-            } catch (e: Exception) {
-                mainHandler.post {
-                    dialog.dismiss()
-                    toast(activity, "下载失败：${e.message}")
-                }
             }
-        }.start()
+            return if (cancelled.get()) "连接停滞" else null
+        } finally {
+            conn?.disconnect()
+        }
     }
 
     private fun install(activity: Activity, apk: File) {

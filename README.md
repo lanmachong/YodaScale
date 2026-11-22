@@ -4,7 +4,7 @@
 > 通过蓝牙广播读取 Yoda0 / 芯海（Chipsea）OKOK 1.1 协议的体重秤，体重数据只存在手机本地。
 > v2.1.0 起新增应用内 OTA，**仅联网检查 GitHub 更新和下载安装包，不上传任何个人数据**（详见下方「关于权限」）。
 
-当前版本：**v2.2.0**（`versionCode 4`）。变更记录见 [CHANGELOG.md](CHANGELOG.md)，后续规划见 [ROADMAP.md](ROADMAP.md)。
+当前版本：**v2.2.1**（`versionCode 5`）。变更记录见 [CHANGELOG.md](CHANGELOG.md)，后续规划见 [ROADMAP.md](ROADMAP.md)。
 
 ## 功能
 
