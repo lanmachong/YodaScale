@@ -27,3 +27,5 @@ captures/
 Thumbs.db
 
 # 注意：gradle/wrapper/gradle-wrapper.jar 需要入库，不要忽略
+# 注意：app/debug.keystore 是公开的标准 Android 调试密钥，需要入库以保证本机与 CI 签名一致，
+#       不要加入 *.jks / *.keystore 之类的忽略规则，否则 OTA 更新会因签名冲突安装失败

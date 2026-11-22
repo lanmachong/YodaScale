@@ -3,6 +3,16 @@
 本项目所有值得注意的版本变更都会记录在此文件。
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.2.2] - 2026-11-22
+
+第六个版本：修复签名冲突、新增应用图标。
+
+### 修复
+- **签名冲突（安装失败）**：此前 CI 用 runner 自动生成的随机 debug key 签名，与本机 APK 签名不同，导致 OTA 下载后安装报「签名冲突」。现将固定 `debug.keystore` 纳入仓库，`build.gradle` 显式配置所有构建类型共用它，本机与 CI 签名完全一致（SHA-1 `ffbc5b02…`）
+
+### 新增
+- **应用图标**：新增体重秤主题 launcher 图标（深蓝圆角背景 + 白色秤体 + 显示屏读数），提供 mdpi~xxxhdpi 各密度 PNG 与 Android 8+ 自适应图标
+
 ## [2.2.1] - 2026-11-22
 
 第五个版本：修复 OTA 下载卡死。
